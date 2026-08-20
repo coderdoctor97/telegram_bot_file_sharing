@@ -1,7 +1,8 @@
 """
-bot/bot.py — Telegram-Vault File Sharing bot
-Receives /start <token>, maps to Message ID, silently copy_message's the file
-from a private vault channel to the user.
+bot/bot.py — Telegram-Vault File Sharing bot (webhook mode for Render free tier)
+Receives POST /webhook from Telegram, maps token → Message ID, silently
+copy_message's the file from a private vault channel to the user.
+Also exposes GET /health for uptime checks.
 """
 import json
 import logging
@@ -9,7 +10,9 @@ import os
 import re
 import sys
 
+import requests
 import telebot
+from flask import Flask, request, abort
 from telebot import types
 from dotenv import load_dotenv
 
@@ -29,6 +32,7 @@ load_dotenv()
 
 BOT_TOKEN  = os.environ.get("BOT_TOKEN", "").strip()
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "").strip()
+PORT       = int(os.environ.get("PORT", "10000"))
 
 if not BOT_TOKEN:
     log.error("BOT_TOKEN env var is missing. Set it before running the bot.")
@@ -54,16 +58,32 @@ except (json.JSONDecodeError, ValueError) as exc:
 # ─── Bot instance ─────────────────────────────────────────────────────────────
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
+# ─── Flask app ────────────────────────────────────────────────────────────────
+app = Flask(__name__)
+
+
+@app.route("/health", methods=["GET"])
+def health() -> tuple[dict, int]:
+    return {"status": "ok", "tokens_loaded": len(FILE_MAP)}, 200
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook() -> tuple[str, int]:
+    if request.headers.get("content-type") != "application/json":
+        abort(403)
+    update = telebot.types.Update.de_json(request.get_json())
+    bot.process_new_updates([update])
+    return "", 200
+
+
 # ─── Handlers ─────────────────────────────────────────────────────────────────
 
 @bot.message_handler(commands=["start"])
 def handle_start(message: types.Message) -> None:
-    """Handle /start with optional token payload."""
     text = (message.text or "").strip()
     parts = text.split(maxsplit=1)
 
     if len(parts) == 1:
-        # No token — welcome message
         bot.reply_to(
             message,
             "👋 Welcome to <b>Telegram-Vault</b>!\n\n"
@@ -75,17 +95,14 @@ def handle_start(message: types.Message) -> None:
 
     payload = parts[1].strip()
 
-    # Validate token format
     if not TOKEN_RE.match(payload):
         bot.reply_to(
             message,
-            "⚠️ That link looks invalid. "
-            "Please use a link from the official file list.",
+            "⚠️ That link looks invalid. Please use a link from the official file list.",
         )
         log.warning("Malformed token from user %s: %r", message.from_user.id, payload)
         return
 
-    # Look up message ID
     msg_id = FILE_MAP.get(payload)
     if msg_id is None:
         bot.reply_to(
@@ -96,7 +113,6 @@ def handle_start(message: types.Message) -> None:
         log.info("Unknown token from user %s: %s", message.from_user.id, payload)
         return
 
-    # Deliver the file silently via copy_message
     user_id = message.chat.id
     try:
         bot.copy_message(
@@ -104,29 +120,20 @@ def handle_start(message: types.Message) -> None:
             from_chat_id=int(CHANNEL_ID),
             message_id=int(msg_id),
         )
-        log.info(
-            "Delivered file to user %s (token=%s, msg_id=%s)",
-            user_id, payload, msg_id,
-        )
+        log.info("Delivered file to user %s (token=%s, msg_id=%s)", user_id, payload, msg_id)
     except telebot.apihelper.ApiException as exc:
         log.error("copy_message failed for user %s token=%s: %s", user_id, payload, exc)
         bot.reply_to(
             message,
-            "⚠️ Could not deliver the file right now. "
-            "Please try again later or contact support.",
+            "⚠️ Could not deliver the file right now. Please try again later.",
         )
         return
 
-    # Confirmation (no internal details revealed)
-    bot.reply_to(
-        message,
-        "✅ File delivered! Check above 👆",
-    )
+    bot.reply_to(message, "✅ File delivered! Check above 👆")
 
 
 @bot.message_handler(commands=["help"])
 def handle_help(message: types.Message) -> None:
-    """Show usage instructions."""
     bot.reply_to(
         message,
         "📚 <b>Telegram-Vault Help</b>\n\n"
@@ -139,20 +146,36 @@ def handle_help(message: types.Message) -> None:
 
 @bot.message_handler(func=lambda _: True)
 def handle_unknown(message: types.Message) -> None:
-    """Catch-all for unrecognised messages."""
     bot.reply_to(
         message,
         "I didn't understand that. Use /start with a file link, or /help for info.",
     )
 
+
 # ─── Entrypoint ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    log.info("Starting Telegram-Vault bot (polling mode)…")
+    log.info("Starting Telegram-Vault bot (webhook mode) on port %d…", PORT)
+
+    render_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+    if not render_url:
+        render_url = "https://telegram-vault-bot.onrender.com"  # override if needed
+
+    webhook_url = f"{render_url}/webhook"
+    log.info("Registering webhook: %s", webhook_url)
+
     try:
-        bot.infinity_polling(skip_pending=True)
-    except KeyboardInterrupt:
-        log.info("Bot stopped by user.")
-        sys.exit(0)
+        resp = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
+            json={"url": webhook_url},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("ok"):
+            log.info("Webhook registered successfully.")
+        else:
+            log.error("Telegram webhook error: %s", result.get("description"))
     except Exception as exc:
-        log.critical("Bot crashed: %s", exc, exc_info=True)
-        sys.exit(1)
+        log.error("Failed to set webhook at startup: %s", exc)
+
+    app.run(host="0.0.0.0", port=PORT, debug=False)
