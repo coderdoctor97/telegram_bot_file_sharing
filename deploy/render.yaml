@@ -1,0 +1,38 @@
+# Render deployment configuration for Telegram-Vault bot
+# Deploy method: "Blueprint" — upload this file via Render Dashboard
+# Docs: https://render.com/docs/blueprint-spec
+
+# ─── SERVICE DEFINITION ───────────────────────────────────────────────────────
+services:
+  - type: web
+    name: telegram-vault-bot
+    runtime: python
+    plan: free
+    region: frankfurt    # change to your nearest region (see Render docs)
+    branch: main         # or 'master' — match your default branch
+    buildCommand: pip install -r bot/requirements.txt
+    startCommand: python bot/bot.py
+
+    # Environment variables — paste REAL values after deploying
+    # ⚠️  NEVER commit real secrets. Use Render Dashboard → Environment tab.
+    envVars:
+      - key: BOT_TOKEN
+        sync: false     # set manually in dashboard (keeps it secret)
+      - key: CHANNEL_ID
+        sync: false
+      - key: PORT
+        value: "10000"
+
+    # ── Webhook setup ──────────────────────────────────────────────────────
+    # Render free tier spins down after 15 min of inactivity.
+    # Set webhook URL (run once after first deploy):
+    #   https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://telegram-vault-bot.onrender.com/webhook
+    #
+    # Note: webhook path in bot.py must match "/webhook" above.
+    # If your bot.py uses polling instead, switch startCommand to the
+    # polling loop and remove the webhook registration step.
+
+# ─── DISK / PERSISTENCE ───────────────────────────────────────────────────────
+# Free tier has an ephemeral filesystem. file_map.json is deployed with code.
+# For dynamic token updates, redeploy or use Render's persistent disk add-on.
+# No disk block needed for the static file_map approach described in this repo.

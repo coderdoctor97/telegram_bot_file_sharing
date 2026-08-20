@@ -1,0 +1,13 @@
+{
+  "CHANNEL_ID": "-1004478471985",
+  "files": [
+    {
+      "title": "Fontcrafter Template A4",
+      "type": "pdf",
+      "filename": "fontcrafter-template-a4.pdf",
+      "message_id": 6,
+      "token": "K-gWaKa6Zf3A"
+    }
+  ],
+  "note": "Real vault data from SYNC-1. Token field blank — token_generator.py --apply fills it."
+}

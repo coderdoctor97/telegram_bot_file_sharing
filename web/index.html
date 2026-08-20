@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Telegram-Vault File Sharing</title>
+  <style>
+    /* ── Reset & base ── */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1a1a2e;
+      color: #ffffff;
+      padding: 1.25rem 1rem;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    header p {
+      font-size: 0.82rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+
+    /* ── Main container ── */
+    main {
+      flex: 1;
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 1.25rem 1rem;
+    }
+
+    /* ── Card ── */
+    .file-card {
+      background: #ffffff;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 0.875rem;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+      transition: box-shadow 0.15s ease;
+    }
+
+    .file-card:hover {
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+    }
+
+    /* ── Type icon circle ── */
+    .type-icon {
+      flex-shrink: 0;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #ffffff;
+    }
+
+    .type-icon.pdf  { background: #e74c3c; }
+    .type-icon.zip  { background: #2980b9; }
+
+    /* ── Card body ── */
+    .file-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .file-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #1a1a2e;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    .file-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 0.3rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      color: #ffffff;
+    }
+
+    .file-badge.pdf { background: #e74c3c; }
+    .file-badge.zip { background: #2980b9; }
+
+    /* ── Button ── */
+    .get-file-btn {
+      flex-shrink: 0;
+      display: inline-block;
+      padding: 0.55rem 0.9rem;
+      background: #27ae60;
+      color: #ffffff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: background 0.15s ease;
+    }
+
+    .get-file-btn:hover {
+      background: #1e8449;
+    }
+
+    .get-file-btn:active {
+      background: #196f3d;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: #7f8c8d;
+    }
+
+    .empty-state p {
+      font-size: 0.95rem;
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 0.75rem 1rem;
+      font-size: 0.72rem;
+      color: #95a5a6;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 400px) {
+      .file-card {
+        flex-wrap: wrap;
+      }
+      .get-file-btn {
+        width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>📂 Telegram-Vault</h1>
+    <p>Click a file to receive it privately via Telegram</p>
+  </header>
+
+  <main>
+    <div id="file-list" aria-live="polite"></div>
+  </main>
+
+  <footer>
+    Telegram-Vault File Sharing · Static Frontend
+  </footer>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════
+    // FILE DATABASE — QA swaps real data at SYNC-3 (master_agent.md §4.7)
+    // Token regex: ^[A-Za-z0-9_-]{10,64}$  (master_agent.md §4.1)
+    // ═══════════════════════════════════════════════════════════════
+    // SWAPPED BY QA AT SYNC-3 — real data from handoff/frontend_snippet.json
+    const fileDatabase = [
+      {"title": "Fontcrafter Template A4", "token": "K-gWaKa6Zf3A", "type": "pdf"}
+    ];
+
+    // QA swaps real username at SYNC-3 (master_agent.md §4.2, §4.6)
+    const BOT_USERNAME = "PDFDeliveryBoy_bot"; // swapped by QA at SYNC-3
+
+    // ═══════════════════════════════════════════════════════════════
+    // RENDERER — reads fileDatabase, renders one card per entry
+    // ═══════════════════════════════════════════════════════════════
+    function renderFiles() {
+      const container = document.getElementById("file-list");
+
+      // Empty state
+      if (!fileDatabase || fileDatabase.length === 0) {
+        container.innerHTML =
+          '<div class="empty-state"><p>No files available right now.</p></div>';
+        return;
+      }
+
+      container.innerHTML = "";
+
+      fileDatabase.forEach(function (entry) {
+        // Deep link per master_agent.md §4.2
+        const deepLink = "https://t.me/" + BOT_USERNAME + "?start=" + entry.token;
+
+        // Type badge class
+        const typeClass = entry.type === "pdf" ? "pdf" : "zip";
+        const typeLabel = entry.type === "pdf" ? "PDF" : "ZIP";
+
+        // Build card
+        const card = document.createElement("div");
+        card.className = "file-card";
+        card.innerHTML =
+          '<div class="type-icon ' + typeClass + '">' + typeLabel + '</div>' +
+          '<div class="file-info">' +
+            '<div class="file-title">' + escapeHtml(entry.title) + '</div>' +
+            '<span class="file-badge ' + typeClass + '">' + typeLabel + '</span>' +
+          '</div>' +
+          '<a class="get-file-btn" href="' + deepLink + '" target="_blank" rel="noopener noreferrer">Get File</a>';
+
+        container.appendChild(card);
+      });
+    }
+
+    // Prevent XSS in file titles
+    function escapeHtml(str) {
+      const map = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      };
+      return String(str).replace(/[&<>"']/g, function (ch) { return map[ch]; });
+    }
+
+    // Render on load
+    renderFiles();
+  </script>
+
+</body>
+</html>
